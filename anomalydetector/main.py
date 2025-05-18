@@ -1,31 +1,32 @@
 import os
+from collections import defaultdict
+
 import numpy as np
 
-from sklearn.ensemble import IsolationForest
-from collections import defaultdict
-from quixstreams import Application
 from dotenv import load_dotenv
+from quixstreams import Application
+from sklearn.ensemble import IsolationForest
 
 load_dotenv()
 
-app = Application(
-    consumer_group="transformation-v1",
-    auto_offset_reset="earliest",
-    broker_address='kafka_broker:9092'
-)
+app = Application(consumer_group="transformation-v1",
+                  auto_offset_reset="earliest",
+                  broker_address='kafka_broker:9092')
 
-input_topic = app.topic(name=os.environ["input"])
-output_topic = app.topic(name=os.environ["output"])
+input_topic = app.topic(os.environ["input"])
+output_topic = app.topic(os.environ["output"])
 
 high_volume_threshold = defaultdict(lambda: 20000)
-fit_prices = []
-is_fitted = False
+fit_prices = []  
+is_fitted = False 
 
-isolation_Forest = IsolationForest(contamination=0.01, n_estimators=1000)
+isolation_forest = IsolationForest(contamination=0.01, n_estimators=1000)
+
 
 def high_volume_rule(trade_data):
     trade_data['high_volume_anomaly'] = bool(trade_data['size'] > high_volume_threshold[trade_data['symbol']])
     return trade_data
+
 
 def isolation_forest_rule(trade_data):
     global is_fitted
@@ -41,7 +42,7 @@ def isolation_forest_rule(trade_data):
     prices_reshaped = fit_prices_normalised.reshape(-1, 1)
 
     if len(fit_prices) % 1000 == 0:
-        isolation_Forest.fit(prices_reshaped)
+        isolation_forest.fit(prices_reshaped)
         is_fitted = True
 
     if not is_fitted:
@@ -49,11 +50,12 @@ def isolation_forest_rule(trade_data):
         return trade_data
 
     current_price_normalised = (current_price - float(np.mean(fit_prices))) / float(np.std(fit_prices))
-    score = isolation_Forest.decision_function([[current_price_normalised]])
+    score = isolation_forest.decision_function([[current_price_normalised]])
 
-    trade_data['isolation_forest_anomaly'] = bool(score[0] < 0)  # anomalies are indicated by negative scores
+    trade_data['isolation_forest_anomaly'] = bool(score[0] < 0)  
 
     return trade_data
+
 
 def combine_anomalies(trade_data):
     anomalies = []
@@ -67,6 +69,7 @@ def combine_anomalies(trade_data):
 
     return trade_data
 
+
 if __name__ == "__main__":
     sdf = app.dataframe(input_topic)
 
@@ -75,9 +78,13 @@ if __name__ == "__main__":
            .apply(isolation_forest_rule)
            .apply(combine_anomalies)
            )
-    
+
+    # Filter out only rows where 1 or more anomalies are detected
     sdf = sdf.filter(lambda row: row.get('anomalies') and len(row['anomalies']) >= 1)
 
-    sdf = sdf.to_topic(output_topic)
+    sdf.to_topic(output_topic)
+    # elasticsearch
+    # postgres
+    # streamlit
 
     app.run(sdf)
