@@ -1,0 +1,9 @@
+name: producer
+language: Python
+variables:
+  - name: output
+    inputType: OutputTopic
+    defaultValue: stocks
+dockerfile: dockerfile
+runEntryPoint: main.py
+defaultFile: main.py
